@@ -9,9 +9,12 @@ RS='\033[0m'
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-term_width=$(tput cols)
-BOX_WIDTH=$(( term_width > 60 ? 58 : term_width - 2 ))
+term_width=$(tput cols 2>/dev/null || printf '80')
+[[ "$term_width" =~ ^[0-9]+$ ]] || term_width=80
+BOX_WIDTH=$(( term_width > 64 ? 62 : term_width - 2 ))
+[ "$BOX_WIDTH" -lt 32 ] && BOX_WIDTH=32
 margin=$(( (term_width - BOX_WIDTH) / 2 ))
+margin=$(( margin > 0 ? margin : 0 ))
 left_pad=$(printf '%*s' "$margin" "")
 
 draw_line() {
@@ -25,32 +28,121 @@ print_center() {
     local color="$2"
     local len=${#text}
     local space_len=$(( (BOX_WIDTH - 2 - len) / 2 ))
+    [ "$space_len" -lt 0 ] && space_len=0
     printf "${C}${left_pad}║%*s${color}%s${C}%*s║${RS}\n" $space_len "" "$text" $(( BOX_WIDTH - 2 - len - space_len )) ""
+}
+
+ui_top() {
+    local title="$1"
+    printf "${C}${left_pad}╔"
+    for ((i=0; i<BOX_WIDTH-2; i++)); do printf "═"; done
+    printf "╗${RS}\n"
+    print_center "$title" "${W}"
+    printf "${C}${left_pad}╠"
+    for ((i=0; i<BOX_WIDTH-2; i++)); do printf "═"; done
+    printf "╣${RS}\n"
+}
+
+ui_bottom() {
+    printf "${C}${left_pad}╚"
+    for ((i=0; i<BOX_WIDTH-2; i++)); do printf "═"; done
+    printf "╝${RS}\n"
+}
+
+ui_section() {
+    printf "\n${left_pad}${C}  ── ${W}%s ${C}────────────────────${RS}\n" "$1"
+}
+
+ui_item() {
+    local key="$1"
+    local label="$2"
+    local accent="${3:-$G}"
+    printf "${left_pad}${C}  │ ${W}%02d${C}  ${accent}%s${RS}\n" "$key" "$label"
+}
+
+ui_prompt() {
+    echo -ne "\n${left_pad}${C}  ╰─ ${Y}Select option${C} › ${RS}"
+}
+
+ui_boot_animation() {
+    local frame
+    local spinner=('◐' '◓' '◑' '◒')
+    clear
+    ui_top "TERMUX-OS  /  INITIALIZING"
+    print_center "Loading control modules" "${C}"
+
+    local chars=('01' 'system' 'neon' 'shell' 'root' 'kernel' 'secure')
+    for frame in 1 2 3 4 5 6; do
+        printf "\r${left_pad}${G}  "
+        for ((i=0; i<frame; i++)); do
+            printf "%s " "${chars[$(( (i + frame) % ${#chars[@]} ))]}"
+        done
+        printf "%*s${RS}" $((BOX_WIDTH-2-frame*7)) ""
+        sleep 0.08
+    done
+    printf "\n"
+
+    for frame in 0 1 2 3 0 1 2 3; do
+        printf "\r${left_pad}${C}║${Y}  ${spinner[$frame]}${W}  Verifying system modules"
+        local fill=$(( (frame % 4) + 1 ))
+        printf "  ["
+        for ((i=1; i<=4; i++)); do
+            [ "$i" -le "$fill" ] && printf "${G}▓${C}" || printf "░"
+        done
+        printf "]${C}%*s║${RS}" $((BOX_WIDTH-2-35)) ""
+        sleep 0.10
+    done
+    printf "\n"
+    print_center "SYSTEM READY" "${G}"
+    ui_bottom
+    sleep 0.35
+}
+
+live_system_info() {
+    local parts=""
+
+    if command -v free >/dev/null 2>&1; then
+        local ram
+        ram=$(free -m 2>/dev/null | awk '/Mem:/ {printf "RAM %d/%dMB", $3, $2}')
+        [ -n "$ram" ] && parts="$ram"
+    fi
+
+    if command -v df >/dev/null 2>&1; then
+        local storage
+        storage=$(df -h "$HOME" 2>/dev/null | awk 'NR==2 {printf "HOME %s free", $4}')
+        [ -n "$storage" ] && parts="${parts:+$parts  •  }$storage"
+    fi
+
+    if command -v termux-battery-status >/dev/null 2>&1; then
+        local battery
+        battery=$(termux-battery-status 2>/dev/null | sed -n 's/.*"percentage"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/BAT \1%/p')
+        [ -n "$battery" ] && parts="${parts:+$parts  •  }$battery"
+    fi
+
+    [ -n "$parts" ] && print_center "$parts" "${G}"
+}
+
+ui_status_pulse() {
+    local pulse=('●' '◉' '◎')
+    local i
+    for i in 0 1 2 1 0; do
+        printf "\r${left_pad}${C}  [${G}${pulse[$i]}${C}] ${W}CONTROL CHANNEL ACTIVE${RS}"
+        sleep 0.08
+    done
+    printf "\n"
 }
 
 banner() {
     clear
-    local R="\e[1;31m" 
-    local G="\e[1;32m" 
-    local C="\e[1;36m" 
-    local W="\e[1;37m"
-    local Y="\e[1;33m" 
-    local N="\e[0m"    
-
-    echo -e "${C} ______                              ${R}  ___  ____"
-    echo -e "${C}/_  __/__  _________ ___  __  ___  __${R} / _ \/ __/"
-    echo -e "${C} / / / _ \/ ___/ __ '__ \/ / / / |/_/${R}/ // /\ \  "
-    echo -e "${C}/_/  \___/_/  /_/ /_/ /_/\__,_/_/|_| ${R}\___/___/  "
-    echo -e "                                      "
-    echo -e "${W}      --[ ${G}Termux Optimization Tool ${W}]--       "
-    echo -e ""
-    echo -e "${R} [!]${W} Author  : ${C}Raj Aryan (H4Ck3R0)"
-    echo -e "${R} [!]${W} Version : ${Y}v3.5 (Stable)"
-    echo -e "${R} [!]${W} Youtube : ${W}youtube.com/h4ck3r0"
-    echo -e "${R} [!]${W} GitHub  : ${W}github.com/H4Ck3R0"
-    echo -e ""
-    echo -e "${G} ==============================================${N}"
-    echo -e ""
+    local shell_name="${SHELL:-bash}"
+    shell_name="${shell_name##*/}"
+    ui_top "TERMUX-OS  /  CONTROL CENTER"
+    print_center "TERMUX  /  OS" "${W}"
+    print_center "ADVANCED TERMINAL CUSTOMIZATION" "${G}"
+    print_center "H4Ck3R0  •  v3.5 Stable  •  $shell_name" "${C}"
+    live_system_info
+    ui_bottom
+    ui_status_pulse
 }
 
 ensure_dependencies() {
@@ -871,16 +963,15 @@ configure_back_key() {
 
 termux_properties_menu() {
     banner
-    printf "\n${left_pad}${C}───[${W} Termux Settings & Behavior ${C}]───"
-    printf "\n${left_pad}${C}[${W}01${C}]${G} Cursor Style"
-    printf "\n${left_pad}${C}[${W}02${C}]${G} Cursor Blinking"
-    printf "\n${left_pad}${C}[${W}03${C}]${G} Extra Keys Keyboard Rows"
-    printf "\n${left_pad}${C}[${W}04${C}]${G} Bell Character Sound/Vibrate"
-    printf "\n${left_pad}${C}[${W}05${C}]${G} Fullscreen Mode"
-    printf "\n${left_pad}${C}[${W}06${C}]${G} Back-Key Action"
-    printf "\n${left_pad}${C}[${W}00${C}]${R} Back to Main Menu\n\n"
-    
-    echo -ne "${left_pad}${C}Selection: ${RS}"
+    ui_section "TERMUX BEHAVIOR"
+    ui_item 1 "Cursor Style" "$G"
+    ui_item 2 "Cursor Blinking" "$G"
+    ui_item 3 "Extra Keys Keyboard Rows" "$G"
+    ui_item 4 "Bell Character  (Sound/Vibrate)" "$G"
+    ui_item 5 "Fullscreen Mode" "$G"
+    ui_item 6 "Back-Key Action" "$G"
+    ui_item 0 "Back to Main Menu" "$R"
+    ui_prompt
     read a
     case $a in
         1|01) configure_cursor_style ;;
@@ -896,17 +987,16 @@ termux_properties_menu() {
 
 font_menu() {
     banner
-    printf "\n${left_pad}${C}───[${W} Termux Nerd Fonts Gallery ${C}]───"
-    printf "\n${left_pad}${C}[${W}01${C}]${G} Fira Code Nerd Font"
-    printf "\n${left_pad}${C}[${W}02${C}]${G} JetBrains Mono Nerd Font"
-    printf "\n${left_pad}${C}[${W}03${C}]${G} Hack Nerd Font"
-    printf "\n${left_pad}${C}[${W}04${C}]${G} Caskaydia Cove Nerd Font (Cascadia Code)"
-    printf "\n${left_pad}${C}[${W}05${C}]${G} Sauce Code Pro Nerd Font (Source Code Pro)"
-    printf "\n${left_pad}${C}[${W}06${C}]${G} Ubuntu Nerd Font"
-    printf "\n${left_pad}${C}[${W}07${C}]${G} Meslo Nerd Font"
-    printf "\n${left_pad}${C}[${W}00${C}]${R} Back to Main Menu\n\n"
-    
-    echo -ne "${left_pad}${C}Selection: ${RS}"
+    ui_section "NERD FONTS"
+    ui_item 1 "Fira Code" "$G"
+    ui_item 2 "JetBrains Mono" "$G"
+    ui_item 3 "Hack" "$G"
+    ui_item 4 "Caskaydia Cove  (Cascadia Code)" "$G"
+    ui_item 5 "Sauce Code Pro  (Source Code Pro)" "$G"
+    ui_item 6 "Ubuntu" "$G"
+    ui_item 7 "Meslo" "$G"
+    ui_item 0 "Back to Main Menu" "$R"
+    ui_prompt
     read a
     case $a in
         1|01) do_install_font "FiraCode.zip" "Fira Code" ;;
@@ -1136,13 +1226,12 @@ do_set_theme() {
 # Sub-menus
 zsh_menu() {
     banner
-    printf "\n${left_pad}${C}[${W}01${C}]${G} Full Zsh Setup (Oh My Zsh + Custom Theme)"
-    printf "\n${left_pad}${C}[${W}02${C}]${G} Switch to Zsh Shell"
-    printf "\n${left_pad}${C}[${W}03${C}]${Y} Customize Prompt & Welcome Banner"
-    printf "\n${left_pad}${C}───"
-    printf "\n${left_pad}${C}[${W}00${C}]${R} Back to Main Menu\n\n"
-    
-    echo -ne "${left_pad}${C}Selection: ${RS}"
+    ui_section "ZSH CUSTOMIZER"
+    ui_item 1 "Full Zsh Setup  (Oh My Zsh + Theme)" "$G"
+    ui_item 2 "Switch to Zsh Shell" "$G"
+    ui_item 3 "Customize Prompt & Welcome Banner" "$Y"
+    ui_item 0 "Back to Main Menu" "$R"
+    ui_prompt
     read a
     case $a in
         1|01) do_zsh_setup ;;
@@ -1155,13 +1244,12 @@ zsh_menu() {
 
 bash_menu() {
     banner
-    printf "\n${left_pad}${C}[${W}01${C}]${G} Full Bash Setup (ble.sh + Custom Theme)"
-    printf "\n${left_pad}${C}[${W}02${C}]${G} Switch to Bash Shell"
-    printf "\n${left_pad}${C}[${W}03${C}]${Y} Customize Prompt & Welcome Banner"
-    printf "\n${left_pad}${C}───"
-    printf "\n${left_pad}${C}[${W}00${C}]${R} Back to Main Menu\n\n"
-    
-    echo -ne "${left_pad}${C}Selection: ${RS}"
+    ui_section "BASH CUSTOMIZER"
+    ui_item 1 "Full Bash Setup  (ble.sh + Theme)" "$G"
+    ui_item 2 "Switch to Bash Shell" "$G"
+    ui_item 3 "Customize Prompt & Welcome Banner" "$Y"
+    ui_item 0 "Back to Main Menu" "$R"
+    ui_prompt
     read a
     case $a in
         1|01) do_bash_setup ;;
@@ -1174,13 +1262,12 @@ bash_menu() {
 
 fish_menu() {
     banner
-    printf "\n${left_pad}${C}[${W}01${C}]${G} Full Fish Setup (config + Custom Theme)"
-    printf "\n${left_pad}${C}[${W}02${C}]${G} Switch to Fish Shell"
-    printf "\n${left_pad}${C}[${W}03${C}]${Y} Customize Prompt & Welcome Banner"
-    printf "\n${left_pad}${C}───"
-    printf "\n${left_pad}${C}[${W}00${C}]${R} Back to Main Menu\n\n"
-    
-    echo -ne "${left_pad}${C}Selection: ${RS}"
+    ui_section "FISH CUSTOMIZER"
+    ui_item 1 "Full Fish Setup  (config + Theme)" "$G"
+    ui_item 2 "Switch to Fish Shell" "$G"
+    ui_item 3 "Customize Prompt & Welcome Banner" "$Y"
+    ui_item 0 "Back to Main Menu" "$R"
+    ui_prompt
     read a
     case $a in
         1|01) do_fish_setup ;;
@@ -1193,12 +1280,12 @@ fish_menu() {
 
 system_menu() {
     banner
-    printf "\n${left_pad}${C}[${W}01${C}]${B} Add Cyber Lock ${R}(Top Security)"
-    printf "\n${left_pad}${C}[${W}02${C}]${R} Remove Lock"
-    printf "\n${left_pad}${C}[${W}03${C}]${W} Update Script"
-    printf "\n${left_pad}${C}[${W}00${C}]${R} Back to Main Menu\n\n"
-    
-    echo -ne "${left_pad}${C}Selection: ${RS}"
+    ui_section "SECURITY & UPDATES"
+    ui_item 1 "Add Cyber Lock  (Top Security)" "$B"
+    ui_item 2 "Remove Cyber Lock" "$R"
+    ui_item 3 "Update Script" "$W"
+    ui_item 0 "Back to Main Menu" "$R"
+    ui_prompt
     read a
     case $a in
         1|01) do_add_lock    ;;
@@ -1211,21 +1298,20 @@ system_menu() {
 
 color_theme_menu() {
     banner
-    printf "\n${left_pad}${C}[${W}01${C}]${G} Default (Gunmetal)"
-    printf "\n${left_pad}${C}[${W}02${C}]${G} Dracula Theme"
-    printf "\n${left_pad}${C}[${W}03${C}]${G} Nord Theme"
-    printf "\n${left_pad}${C}[${W}04${C}]${G} Monokai Theme"
-    printf "\n${left_pad}${C}[${W}05${C}]${G} Solarized Dark Theme"
-    printf "\n${left_pad}${C}[${W}06${C}]${G} Gruvbox Theme"
-    printf "\n${left_pad}${C}[${W}07${C}]${G} Tokyo Night Theme"
-    printf "\n${left_pad}${C}[${W}08${C}]${G} Catppuccin Theme"
-    printf "\n${left_pad}${C}[${W}09${C}]${G} Ayu Dark Theme"
-    printf "\n${left_pad}${C}[${W}10${C}]${G} Cobalt2 Theme"
-    printf "\n${left_pad}${C}[${W}11${C}]${G} One Half Dark Theme"
-    printf "\n${left_pad}${C}───"
-    printf "\n${left_pad}${C}[${W}00${C}]${R} Back to Main Menu\n\n"
-    
-    echo -ne "${left_pad}${C}Selection: ${RS}"
+    ui_section "TERMUX COLOR THEMES"
+    ui_item 1 "Default  (Gunmetal)" "$G"
+    ui_item 2 "Dracula" "$G"
+    ui_item 3 "Nord" "$G"
+    ui_item 4 "Monokai" "$G"
+    ui_item 5 "Solarized Dark" "$G"
+    ui_item 6 "Gruvbox" "$G"
+    ui_item 7 "Tokyo Night" "$G"
+    ui_item 8 "Catppuccin" "$G"
+    ui_item 9 "Ayu Dark" "$G"
+    ui_item 10 "Cobalt2" "$G"
+    ui_item 11 "One Half Dark" "$G"
+    ui_item 0 "Back to Main Menu" "$R"
+    ui_prompt
     read a
     case $a in
         1|01) do_set_theme "default" ;;
@@ -1246,17 +1332,17 @@ color_theme_menu() {
 
 menu() {
     banner
-    printf "\n${left_pad}${C}[${W}01${C}]${G} Necessary Setup"
-    printf "\n${left_pad}${C}[${W}02${C}]${G} Zsh Customizer"
-    printf "\n${left_pad}${C}[${W}03${C}]${G} Fish Customizer"
-    printf "\n${left_pad}${C}[${W}04${C}]${G} Bash Customizer"
-    printf "\n${left_pad}${C}[${W}05${C}]${B} Termux Nerd Fonts"
-    printf "\n${left_pad}${C}[${W}06${C}]${Y} Termux Color Themes"
-    printf "\n${left_pad}${C}[${W}07${C}]${C} Termux Behavior Settings"
-    printf "\n${left_pad}${C}[${W}08${C}]${W} Security & Updates"
-    printf "\n${left_pad}${C}[${W}00${C}]${R} Exit Terminal\n\n"
-    
-    echo -ne "${left_pad}${C}Selection: ${RS}"
+    ui_section "MAIN MODULES"
+    ui_item 1 "Necessary Setup" "$G"
+    ui_item 2 "Zsh Customizer" "$G"
+    ui_item 3 "Fish Customizer" "$G"
+    ui_item 4 "Bash Customizer" "$G"
+    ui_item 5 "Termux Nerd Fonts" "$B"
+    ui_item 6 "Termux Color Themes" "$Y"
+    ui_item 7 "Termux Behavior Settings" "$C"
+    ui_item 8 "Security & Updates" "$W"
+    ui_item 0 "Exit Terminal" "$R"
+    ui_prompt
     read a
     case $a in
         1|01) do_full_setup ;;
@@ -1272,5 +1358,6 @@ menu() {
     esac
 }
 
+ui_boot_animation
 check_for_updates
 menu
